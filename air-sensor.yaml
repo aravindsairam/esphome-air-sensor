@@ -1,0 +1,299 @@
+# air-sensor: ESP32 DevKit (esp32dev) + Waveshare 2.13" e-paper V4 (B/W, 250x122)
+#
+# Air quality from a Sensirion SEN66 on the Adafruit SEN6x breakout (I2C).
+# If the sensor is missing, its values show dashes and everything else keeps
+# working. After plugging it in, power-cycle the ESP32 (no code change needed).
+
+substitutions:
+  # Shown at the bottom of the display (keep it under about 20 characters).
+  # The sensor stays in one place, so this is set by hand. (IP lookup only
+  # knows "Warsaw", not the district.)
+  location: "Młociny, Warsaw"
+
+esphome:
+  name: air-sensor
+  friendly_name: Air Sensor
+  # Draw once right after boot. After that the clock drives the redraws
+  # (see time: and interval: below).
+  on_boot:
+    priority: -100
+    then:
+      - component.update: epaper
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+# OTA is encrypted with the same api_key from secrets.yaml (an empty
+# "encryption:" block inherits it). ESPHome recommends this over a password.
+ota:
+  - platform: esphome
+    encryption:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # If WiFi fails, the board opens a hotspot "air-sensor Fallback" with a
+  # captive portal where you can enter new WiFi details.
+  ap:
+    ssid: "air-sensor Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+# Clock for the footer, set from internet time servers. The Warsaw time zone
+# handles the summer/winter time switch automatically.
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Warsaw
+    # Redraw exactly on the minute, so the clock is never a minute behind.
+    on_time:
+      - seconds: 0
+        then:
+          - component.update: epaper
+    # Redraw as soon as the clock is first set after boot.
+    on_time_sync:
+      - component.update: epaper
+
+# Without WiFi the clock is never set and the on-the-minute redraw never
+# fires, so redraw every 60 s instead. Sensor readings keep updating offline.
+interval:
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            not:
+              time.has_time:
+                id: sntp_time
+          then:
+            - component.update: epaper
+
+# I2C bus for the SEN66. The SEN66 is a 100 kHz device, do not raise this.
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+  frequency: 100kHz
+
+sensor:
+  # Used by the WiFi indicator in the footer. Also shows up in Home Assistant.
+  - platform: wifi_signal
+    id: wifi_rssi
+    name: "WiFi Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+
+  # SEN66 on the Adafruit SEN6x breakout, ESPHome's built-in sen6x platform.
+  # Compensation and calibration stay at their defaults (the platform has no
+  # altitude option). If the sensor is absent at boot, the component logs a
+  # communication error, marks itself failed, and its values stay empty.
+  # Warm-up: PM/temp/RH about a minute, CO2 a few minutes, VOC/NOx up to an hour.
+  - platform: sen6x
+    type: SEN66
+    address: 0x6B
+    update_interval: 10s
+    pm_1_0:
+      name: "PM1.0"
+      id: pm1
+    pm_2_5:
+      name: "PM2.5"
+      id: pm25
+    pm_4_0:
+      name: "PM4.0"
+      id: pm4
+    pm_10_0:
+      name: "PM10"
+      id: pm10
+    temperature:
+      name: "Temperature"
+      id: temp
+    humidity:
+      name: "Humidity"
+      id: hum
+    # "voc_index"/"nox_index" are the current key names ("voc"/"nox" are
+    # deprecated and will stop working in ESPHome 2027.2.0).
+    voc_index:
+      name: "VOC Index"
+      id: voc
+    nox_index:
+      name: "NOx Index"
+      id: nox
+    co2:
+      name: "CO2"
+      id: co2
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+
+# Fonts are fetched from Google Fonts at compile time and cached.
+# Offline? Put a TTF in fonts/ and use e.g. file: "fonts/Roboto-Bold.ttf".
+# bpp defaults to 1, so text is pure black and white (no greys).
+font:
+  # Reading labels (PM1, Temp, CO2, ...).
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 16
+    glyphs: " %()+-./0123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz°µ³"
+  # Reading values, bold so they stand out from the labels.
+  - file: "gfonts://Roboto@700"
+    id: font_value
+    size: 18
+    glyphs: " %.-0123456789°C"
+  # WiFi status and location. Includes Polish letters for the location.
+  - file: "gfonts://Roboto"
+    id: font_tiny
+    size: 11
+    glyphs: " %()+,-./0123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz°µ³ĄąĆćĘęŁłŃńÓóŚśŹźŻż"
+  # Clock in the header, bold.
+  - file: "gfonts://Roboto@700"
+    id: font_time
+    size: 13
+    glyphs: "0123456789:-"
+  # Warning stars next to a reading's label.
+  - file: "gfonts://Roboto@700"
+    id: font_mark
+    size: 12
+    glyphs: "*"
+
+display:
+  - platform: waveshare_epaper
+    id: epaper
+    # V4 panel uses the V3 driver. If the screen stays blank or shows garbage,
+    # try 2.13inv2, then 2.13in, one at a time.
+    model: 2.13inv3
+    # GPIO5 is a strapping pin that must be high at boot. CS idles high, so
+    # it is safe here (it is the ESP32's default SPI CS pin).
+    cs_pin:
+      number: GPIO5
+      ignore_strapping_warning: true
+    dc_pin: GPIO17
+    reset_pin: GPIO16
+    busy_pin: GPIO4
+    # Short reset pulse, as in Waveshare's own V4 driver. ESPHome docs say this
+    # can fix problems with Rev 2.1 driver boards. Remove to use the 200ms default.
+    reset_duration: 2ms
+    # Portrait, 122x250 (the panel's native orientation). If the image is
+    # upside down, use 180. The old landscape layout (rotation 90) is saved
+    # in air-sensor.landscape.yaml.bak.
+    rotation: 0
+    # Redraws come from the clock (every minute, on the minute), see time:.
+    update_interval: never
+    # Partial refresh in between, full refresh every 30 updates (30 min).
+    full_update_every: 30
+    lambda: |-
+      // Formats a reading, or dashes while it has no value (NaN): sensor not
+      // plugged in, still warming up, or a failed read.
+      auto fmt = [](float v, int decimals) -> std::string {
+        if (std::isnan(v)) return "--";
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%.*f", decimals, v);
+        return buf;
+      };
+
+      // Warning stars
+      // A reading gets * (a bit off), ** (bad) or *** (very bad) next to its
+      // label. All limits are here, edit them freely. PM1 and PM4 have no
+      // official limits, so they never get stars.
+      //
+      // high(): bad when high. Stars at or above each of the three limits.
+      auto high = [](float v, float l1, float l2, float l3) -> int {
+        if (std::isnan(v)) return 0;
+        return v >= l3 ? 3 : v >= l2 ? 2 : v >= l1 ? 1 : 0;
+      };
+      // range(): bad when too low or too high. Three (low, high) pairs,
+      // from the comfortable range outwards.
+      auto range = [](float v, float lo1, float hi1, float lo2, float hi2,
+                      float lo3, float hi3) -> int {
+        if (std::isnan(v)) return 0;
+        if (v < lo3 || v > hi3) return 3;
+        if (v < lo2 || v > hi2) return 2;
+        if (v < lo1 || v > hi1) return 1;
+        return 0;
+      };
+      // PM2.5 and PM10 (µg/m³): WHO 24-hour guideline, then WHO interim
+      // targets 2 and 1.
+      const int pm25_stars = high(id(pm25).state, 15, 50, 75);
+      const int pm10_stars = high(id(pm10).state, 45, 100, 150);
+      // CO2 (ppm): German Environment Agency (UBA) says under 1000 is fine
+      // and over 2000 is unacceptable.
+      const int co2_stars = high(id(co2).state, 1000, 1500, 2000);
+      // VOC and NOx are Sensirion indexes where 100 (VOC) and 1 (NOx) mean
+      // "normal for this room". Limits are rules of thumb.
+      const int voc_stars = high(id(voc).state, 150, 250, 400);
+      const int nox_stars = high(id(nox).state, 20, 150, 300);
+      // Comfort: about 19-25 °C and 35-60 % humidity. Very dry or very damp
+      // air (mould risk above about 70 %) gets more stars.
+      const int temp_stars = range(id(temp).state, 19, 25, 17, 27, 15, 30);
+      const int hum_stars = range(id(hum).state, 35, 60, 30, 70, 20, 80);
+
+      // Layout: 122 x 250 portrait, black on white
+      // Header (clock, WiFi), then three groups of readings separated by
+      // lines (particles in µg/m³; temperature and humidity; gases), then
+      // the location at the bottom.
+      const int W = it.get_width();
+      const int LEFT = 3, RIGHT = W - 3;  // text margins
+      const int PITCH = 23;               // distance between rows
+      it.fill(COLOR_OFF);
+
+      auto rule = [&](int y) { it.horizontal_line(0, y, W); };
+      struct Row {
+        const char *label;
+        std::string value;
+        int stars;  // 0 to 3
+      };
+      // A group of readings: label (plus any stars) on the left, value
+      // right-aligned.
+      auto group = [&](int first_base, std::initializer_list<Row> rows) {
+        static const char *const STARS[] = {"", "*", "**", "***"};
+        int base = first_base;
+        for (const auto &r : rows) {
+          it.print(LEFT, base, id(font_small), TextAlign::BASELINE_LEFT, r.label);
+          if (r.stars > 0) {
+            int x1, y1, w, h;
+            it.get_text_bounds(LEFT, base, r.label, id(font_small),
+                               TextAlign::BASELINE_LEFT, &x1, &y1, &w, &h);
+            it.print(LEFT + w + 1, base, id(font_mark), TextAlign::BASELINE_LEFT,
+                     STARS[std::min(r.stars, 3)]);
+          }
+          it.print(RIGHT, base, id(font_value), TextAlign::BASELINE_RIGHT, r.value.c_str());
+          base += PITCH;
+        }
+      };
+
+      // Header: clock on the left, WiFi on the right.
+      auto now = id(sntp_time).now();
+      std::string time_txt = now.is_valid() ? now.strftime("%H:%M") : "--:--";
+      std::string wifi_txt = "No WiFi";
+      if (wifi::global_wifi_component->is_connected()) {
+        float rssi = id(wifi_rssi).state;
+        wifi_txt = std::isnan(rssi) ? "WiFi OK" : "WiFi " + fmt(rssi, 0) + " dBm";
+      }
+      it.print(LEFT, 13, id(font_time), TextAlign::BASELINE_LEFT, time_txt.c_str());
+      it.print(RIGHT, 13, id(font_tiny), TextAlign::BASELINE_RIGHT, wifi_txt.c_str());
+      rule(17);
+
+      group(36, {{"PM1", fmt(id(pm1).state, 1), 0},
+                 {"PM2.5", fmt(id(pm25).state, 1), pm25_stars},
+                 {"PM4", fmt(id(pm4).state, 1), 0},
+                 {"PM10", fmt(id(pm10).state, 1), pm10_stars}});
+      rule(112);
+      // No space before °C and %, so three stars still fit next to "Temp".
+      group(131, {{"Temp", fmt(id(temp).state, 1) + "°C", temp_stars},
+                  {"RH", fmt(id(hum).state, 0) + "%", hum_stars}});
+      rule(161);
+      group(180, {{"CO2", fmt(id(co2).state, 0), co2_stars},
+                  {"VOC", fmt(id(voc).state, 0), voc_stars},
+                  {"NOx", fmt(id(nox).state, 0), nox_stars}});
+      rule(233);
+
+      // Footer: location, centred. Keep it under about 20 characters.
+      it.print(W / 2, 246, id(font_tiny), TextAlign::BASELINE_CENTER, "${location}");

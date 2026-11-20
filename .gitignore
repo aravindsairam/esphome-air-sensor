@@ -1,0 +1,11 @@
+# ESPHome build output and font cache
+/.esphome/
+
+# Real WiFi passwords and keys (see secrets.example.yaml)
+/secrets.yaml
+
+# Python virtual environment with ESPHome
+/.venv/
+
+# Local planning notes
+/esphome-air-sensor-brief.md
