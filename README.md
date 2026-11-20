@@ -136,43 +136,4 @@ A reading gets one, two or three stars next to its label as it moves further fro
 
 PM1 and PM4 have no official limits, so they never get stars.
 
-## Home Assistant
-
-The device uses the native ESPHome API with encryption. Home Assistant discovers it automatically; enter the `api_key` from `secrets.yaml` when asked. These entities appear:
-
-- PM1.0, PM2.5, PM4.0, PM10
-- Temperature, Humidity
-- CO2, VOC Index, NOx Index
-- WiFi Signal (diagnostic)
-
-## WiFi fallback
-
-If the device cannot join your WiFi, it opens a hotspot called `air-sensor Fallback` (password: `ap_password` from `secrets.yaml`). Connect to it and a captive portal lets you enter new WiFi details.
-
-## Troubleshooting
-
-| Problem | Fix |
-|-|-|
-| `/dev/ttyUSB0` never appears on Ubuntu | The `brltty` braille service grabs CH340 USB serial chips. Run `sudo systemctl mask brltty-udev.service brltty.service`, then replug the board. Also make sure you are in the `dialout` group. |
-| Screen stays blank or shows garbage | Change `model:` under `display:` to `2.13inv2`, then `2.13in`, one at a time |
-| Image is upside down | Set `rotation: 180` under `display:` |
-| All sensor values show dashes | The SEN66 was not found at boot. Check the wiring, then power-cycle the ESP32. |
-| Some values show dashes right after boot | The SEN66 is warming up: PM, temperature and humidity take about a minute, CO2 a few minutes, VOC and NOx up to an hour |
-| Log says `OTA rollback detected` | New firmware is only marked good after 60 seconds of uptime. Do not reset the board (EN button, or a logs command that resets it) within 60 seconds of an OTA update. |
-| Build fails while fetching fonts | The first build needs internet for Google Fonts. Offline, put a TTF in `fonts/` and use `file: "fonts/Roboto-Bold.ttf"` instead of `gfonts://`. |
-
-## Alternative layout
-
-[air-sensor.landscape.yaml.bak](air-sensor.landscape.yaml.bak) is an older landscape (250x122) layout: large PM2.5 and CO2 values on the left, VOC, NOx, temperature and humidity on the right, and location, clock and WiFi in the footer. It has no warning stars. To use it, copy it over `air-sensor.yaml` and flash as usual.
-
-## Project files
-
-| File | Purpose |
-|-|-|
-| [air-sensor.yaml](air-sensor.yaml) | ESPHome configuration: WiFi, sensor, display and layout |
-| [secrets.example.yaml](secrets.example.yaml) | Template for `secrets.yaml` (which is git-ignored) |
-| [air-sensor.landscape.yaml.bak](air-sensor.landscape.yaml.bak) | Older landscape layout |
-| [docs/display-preview.png](docs/display-preview.png) | Rendered preview of the screen |
-| [.vscode/settings.json](.vscode/settings.json) | Teaches the VS Code YAML extension about ESPHome tags like `!secret` |
-
 Built and tested with ESPHome 2026.10.0.
